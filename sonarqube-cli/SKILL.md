@@ -30,7 +30,10 @@ sonar --version
 sonar auth status
 ```
 
-If not authenticated, see the Authentication section below.
+**CRITICAL — Credential checks:**
+
+- Before running any `sonar` CLI command, verify authentication by running `sonar auth status`. If it shows no active connection, **stop and ask the user** to run `sonar auth login` before proceeding.
+- Before running any `sonar-scanner` or `scan_branch.py` command, verify that `SONAR_HOST_URL` and `SONAR_TOKEN` are set by checking if they are non-empty. Use `[ -n "${SONAR_HOST_URL}" ]` and `[ -n "${SONAR_TOKEN}" ]` — **NEVER read, print, or log the values of these variables.** If either is empty, **stop and ask the user** to set them before proceeding.
 
 For the full command reference, read `references/commands.md`.
 
@@ -234,26 +237,30 @@ The `sonar-scanner` binary performs a complete project analysis and sends result
 
 ### Prerequisites
 
+- **If the project has a `sonar-project.properties` file, all `sonar-scanner` and `scan_branch.py` commands should be run from that directory.** This file defines project properties (`sonar.projectKey`, `sonar.projectName`, `sonar.sources`, etc.) so they don't need to be passed via `-D` flags. If there is no `sonar-project.properties`, properties must be supplied on the command line instead. A minimal example:
+  ```properties
+  sonar.projectKey=my-project
+  sonar.projectName=My Project
+  sonar.sources=src
+  ```
 - `sonar-scanner` must be installed and on PATH. Install from https://docs.sonarsource.com/sonarqube/latest/analyzing-source-code/scanners/sonarscanner/
-- Environment variables `SONAR_HOST_URL` and `SONAR_TOKEN` must be set
+- Environment variables `SONAR_HOST_URL` and `SONAR_TOKEN` must be set. Before running any sonar-scanner command, verify they are non-empty (`[ -n "${SONAR_HOST_URL}" ]` and `[ -n "${SONAR_TOKEN}" ]`). **NEVER read, print, or log the values of these variables.** If either is empty, stop and ask the user to export them.
 - Branch analysis requires SonarQube Developer Edition or higher (Community Edition has no branch support)
 
 ### Basic usage
 
+**Note:** If the project has a `sonar-project.properties` file, run these commands from that directory. Properties like `sonar.projectKey` and `sonar.projectName` are then read automatically — you only need `-D` flags to override or add properties.
+
 ```bash
-export SONAR_HOST_URL="https://your-sonarqube.example.com"
-export SONAR_TOKEN="squ_your_token_here"
+# First, verify credentials are set (never print their values)
+[ -n "${SONAR_HOST_URL}" ] && [ -n "${SONAR_TOKEN}" ] || echo "Missing SONAR_HOST_URL or SONAR_TOKEN"
 
 # Community Edition — no branch parameter
 git checkout feature/my-branch
-sonar-scanner \
-  -Dsonar.projectKey=my-project \
-  -Dsonar.projectName="My Project"
+sonar-scanner
 
 # Developer Edition+ — with branch analysis
 sonar-scanner \
-  -Dsonar.projectKey=my-project \
-  -Dsonar.projectName="My Project" \
   -Dsonar.branch.name=feature/my-branch
 ```
 
@@ -391,8 +398,8 @@ When a user asks to "scan" or "check" code, choose the right command:
 | Deep server-side analysis (Cloud only) | `sonar analyze sqaa --file <path>` |
 | Full project analysis on a branch (Community Edition) | `python scripts/scan_branch.py --branch <name> --project-key <key>` |
 | Full project analysis with branch analysis (Developer+) | `python scripts/scan_branch.py --branch <name> --project-key <key> --use-branch` |
-| Run sonar-scanner directly (Community Edition) | `git checkout <branch> && sonar-scanner -Dsonar.projectKey=<key>` |
-| Run sonar-scanner directly (Developer+) | `sonar-scanner -Dsonar.projectKey=<key> -Dsonar.branch.name=<branch>` |
+| Run sonar-scanner directly (Community Edition) | `git checkout <branch> && sonar-scanner` |
+| Run sonar-scanner directly (Developer+) | `sonar-scanner -Dsonar.branch.name=<branch>` |
 | View existing issues in a project | `sonar list issues -p <project>` |
 | Browse available projects | `sonar list projects` |
 | Call any SonarQube API | `sonar api <method> <endpoint>` |
