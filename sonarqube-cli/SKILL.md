@@ -1,15 +1,18 @@
 ---
 name: sonarqube-cli
 description: |
-  Use this skill whenever the user wants to interact with SonarQube via the `sonar` CLI tool.
-  This covers all SonarQube CLI workflows including: scanning code for issues and secrets,
-  authenticating with SonarQube Cloud or Server, listing issues and projects, making
+  Use this skill whenever the user wants to interact with SonarQube via the `sonar` CLI tool or
+  `sonar-scanner`. This covers all SonarQube CLI workflows including: scanning code for issues and
+  secrets, authenticating with SonarQube Cloud or Server, listing issues and projects, making
   authenticated API requests, integrating with Claude Code or Git hooks, running server-side
-  analysis (SQAA), verifying files, and managing CLI configuration. Trigger when the user
-  mentions "sonar", "sonarqube", "sonar cli", "sonarqube cli", "sonar analyze", "sonar verify",
-  "sonar scan", "sonar secrets", code quality scanning, secrets scanning, or wants to integrate
-  SonarQube into their workflow. Also trigger when the user asks about detecting hardcoded secrets,
-  preventing secret leaks in commits, or setting up pre-commit/pre-push hooks for security scanning.
+  analysis (SQAA), verifying files, and managing CLI configuration. Also covers full project
+  analysis with sonar-scanner, branch-based scanning, quality gate checks, and the scan_branch.py
+  orchestration script. Trigger when the user mentions "sonar", "sonarqube", "sonar cli",
+  "sonarqube cli", "sonar analyze", "sonar verify", "sonar scan", "sonar secrets", "sonar-scanner",
+  "sonar scanner", code quality scanning, secrets scanning, quality gate, branch analysis, or wants
+  to integrate SonarQube into their workflow. Also trigger when the user asks about detecting
+  hardcoded secrets, preventing secret leaks in commits, setting up pre-commit/pre-push hooks for
+  security scanning, or running a full SonarQube analysis on a specific branch.
 ---
 
 # SonarQube CLI Skill
@@ -225,6 +228,158 @@ sonar analyze secrets src/ || exit 1
 
 The non-zero exit code on secret detection makes this a natural fit for pipeline gating.
 
+## Full Project Analysis with sonar-scanner
+
+The `sonar-scanner` binary performs a complete project analysis and sends results to SonarQube Server or Cloud. This is different from the `sonar` CLI's local scanning commands — `sonar-scanner` does a full server-side analysis with language-specific parsers, coverage integration, and quality gate evaluation.
+
+### Prerequisites
+
+- `sonar-scanner` must be installed and on PATH. Install from https://docs.sonarsource.com/sonarqube/latest/analyzing-source-code/scanners/sonarscanner/
+- Environment variables `SONAR_HOST_URL` and `SONAR_TOKEN` must be set
+- Branch analysis requires SonarQube Developer Edition or higher (Community Edition has no branch support)
+
+### Basic usage
+
+```bash
+export SONAR_HOST_URL="https://your-sonarqube.example.com"
+export SONAR_TOKEN="squ_your_token_here"
+
+# Community Edition — no branch parameter
+git checkout feature/my-branch
+sonar-scanner \
+  -Dsonar.projectKey=my-project \
+  -Dsonar.projectName="My Project"
+
+# Developer Edition+ — with branch analysis
+sonar-scanner \
+  -Dsonar.projectKey=my-project \
+  -Dsonar.projectName="My Project" \
+  -Dsonar.branch.name=feature/my-branch
+```
+
+The scanner writes a report to `.scannerwork/report-task.txt` containing the analysis task ID needed to track completion.
+
+### Checking analysis status
+
+After sonar-scanner completes, the analysis runs asynchronously on the server. Use the SonarQube API to poll for completion:
+
+```bash
+# Extract task ID from the report
+TASK_ID=$(grep ceTaskId .scannerwork/report-task.txt | cut -d= -f2)
+
+# Poll task status
+sonar api get "/api/ce/task?id=$TASK_ID"
+```
+
+### Checking quality gate
+
+```bash
+sonar api get "/api/qualitygates/project_status?projectKey=my-project&branch=feature/my-branch"
+```
+
+### Fetching issues after a failed gate
+
+```bash
+sonar list issues -p my-project --branch feature/my-branch
+```
+
+## Branch Scan Orchestration Script
+
+The skill bundles `scripts/scan_branch.py` — a self-contained Python script (no external dependencies) that automates the full workflow, matching the behavior of the `manual-sonarqube.yml` GitHub Actions workflow:
+
+1. Checks out the specified git ref via `git checkout`
+2. Runs `sonar-scanner` against the single project context (Community Edition compatible by default)
+3. Waits for the server-side analysis to complete
+4. Checks the quality gate result
+5. If passed: prints a success message and exits 0
+6. If failed: fetches and displays all issues, then exits 1
+
+**Community Edition mode (default):** The script does NOT pass `sonar.branch.name` — it checks out the ref and scans. Results update the single project analysis context, exactly like the GitHub Actions workflow. This avoids the Developer Edition requirement.
+
+**Developer Edition+:** Pass `--use-branch` to enable true branch analysis via `sonar.branch.name`.
+
+### Usage
+
+```bash
+# Set required environment variables
+export SONAR_HOST_URL="https://your-sonarqube.example.com"
+export SONAR_TOKEN="squ_your_token_here"
+
+# Community Edition (default) — just checks out the ref and scans
+python scripts/scan_branch.py --branch feature/my-branch --project-key my-project
+
+# With a project subdirectory (like the GitHub Actions workflow)
+python scripts/scan_branch.py --branch develop --project-key my-project --project-dir ./yodea-app
+
+# Developer Edition+ — enable true branch analysis
+python scripts/scan_branch.py --branch feature/my-branch --project-key my-project --use-branch
+
+# With custom timeout and extra scanner args
+python scripts/scan_branch.py \
+  --branch main \
+  --project-key my-project \
+  --timeout 900 \
+  -Dsonar.sources=src
+```
+
+### All options
+
+| Option | Required | Description |
+|---|---|---|
+| `--branch` | Yes | Git branch or ref to checkout before scanning |
+| `--project-key` | No* | SonarQube project key (falls back to `SONAR_PROJECT_KEY` env var) |
+| `--project-name` | No | Display name (defaults to project key) |
+| `--project-dir` | No | Base directory passed as `sonar.projectBaseDir` |
+| `--timeout` | No | Max seconds to wait for analysis (default: 600) |
+| `--poll-interval` | No | Seconds between status polls (default: 5) |
+| `--use-branch` | No | Pass `sonar.branch.name` to scanner (requires Developer Edition+) |
+| Extra positional args | No | Passed through to sonar-scanner (e.g. `-Dsonar.sources=src`) |
+
+*Either `--project-key` or the `SONAR_PROJECT_KEY` environment variable is required.
+
+### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `SONAR_HOST_URL` | Yes | SonarQube server URL |
+| `SONAR_TOKEN` | Yes | SonarQube authentication token — stored in `$SONAR_TOKEN`, used by both `sonar-scanner` and the script |
+| `SONAR_PROJECT_KEY` | No | Default project key (overridden by `--project-key`) |
+
+The `SONAR_TOKEN` is the SonarQube user token used for authentication. It is stored in the `SONAR_TOKEN` environment variable and referenced as `$SONAR_TOKEN`. Both `sonar-scanner` and `scan_branch.py` read it automatically — no need to pass it as a flag. Make sure it is exported before running:
+
+```bash
+export SONAR_TOKEN="squ_your_token_here"
+```
+
+### Output examples
+
+**Quality gate passed:**
+```
+============================================================
+  QUALITY GATE PASSED - Everything looks good!
+============================================================
+```
+
+**Quality gate failed:**
+```
+============================================================
+  QUALITY GATE FAILED (FAILED)
+============================================================
+
+Failed conditions:
+  - new_violations 3 > 0
+
+Issues found: 12
+
+SEVERITY   TYPE            COMPONENT                                 MESSAGE
+--------------------------------------------------------------------
+BLOCKER    BUG             src/app.ts:42                             Null pointer dereference
+CRITICAL   VULNERABILITY   src/auth.ts:15                            Hardcoded credentials
+MAJOR      CODE_SMELL      src/utils.ts:88                           Function has 42 parameters
+```
+
+This script replicates the `manual-sonarqube.yml` GitHub Actions workflow as a local CLI command.
+
 ## Decision Guide
 
 When a user asks to "scan" or "check" code, choose the right command:
@@ -234,6 +389,10 @@ When a user asks to "scan" or "check" code, choose the right command:
 | Check a single file for all issues | `sonar verify --file <path>` |
 | Find hardcoded secrets in files | `sonar analyze secrets <paths...>` |
 | Deep server-side analysis (Cloud only) | `sonar analyze sqaa --file <path>` |
+| Full project analysis on a branch (Community Edition) | `python scripts/scan_branch.py --branch <name> --project-key <key>` |
+| Full project analysis with branch analysis (Developer+) | `python scripts/scan_branch.py --branch <name> --project-key <key> --use-branch` |
+| Run sonar-scanner directly (Community Edition) | `git checkout <branch> && sonar-scanner -Dsonar.projectKey=<key>` |
+| Run sonar-scanner directly (Developer+) | `sonar-scanner -Dsonar.projectKey=<key> -Dsonar.branch.name=<branch>` |
 | View existing issues in a project | `sonar list issues -p <project>` |
 | Browse available projects | `sonar list projects` |
 | Call any SonarQube API | `sonar api <method> <endpoint>` |
