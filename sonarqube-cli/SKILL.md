@@ -33,7 +33,22 @@ sonar auth status
 **CRITICAL — Credential checks:**
 
 - Before running any `sonar` CLI command, verify authentication by running `sonar auth status`. If it shows no active connection, **stop and ask the user** to run `sonar auth login` before proceeding.
-- Before running any `sonar-scanner` or `scan_branch.py` command, verify that `SONAR_HOST_URL` and `SONAR_TOKEN` are set by checking if they are non-empty. Use `[ -n "${SONAR_HOST_URL}" ]` and `[ -n "${SONAR_TOKEN}" ]` — **NEVER read, print, or log the values of these variables.** If either is empty, **stop and ask the user** to set them before proceeding.
+- Before running any `sonar-scanner` or `scan_branch.py` command, verify that `SONAR_HOST_URL` and `SONAR_TOKEN` are set by checking if they are non-empty. Use :
+`if [ -n "${SONAR_HOST_URL}" ]; then
+  echo "Variable is set"
+else
+  echo "Variable is empty"
+fi` 
+
+and 
+
+`if [ -n "${SONAR_TOKEN}" ]; then
+  echo "Variable is set"
+else
+  echo "Variable is empty"
+fi` 
+
+**NEVER read, print, or log the values of these variables.** If either is empty, **stop and ask the user** to set them before proceeding.
 
 For the full command reference, read `references/commands.md`.
 
