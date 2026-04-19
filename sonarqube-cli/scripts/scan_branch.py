@@ -159,25 +159,36 @@ def fetch_issues(host_url: str, token: str, project_key: str, branch: str | None
 SEVERITY_ORDER = {"BLOCKER": 0, "CRITICAL": 1, "MAJOR": 2, "MINOR": 3, "INFO": 4}
 
 
-def format_issues(issues: list[dict]) -> str:
+def _strip_project_key(component: str) -> str:
+    _, _, path = component.partition(":")
+    return path or component
+
+
+def format_issues(issues: list[dict], project_key: str = "") -> str:
     if not issues:
-        return "No issues found."
+        return ""
 
     sorted_issues = sorted(
         issues,
         key=lambda i: SEVERITY_ORDER.get(i.get("severity", "INFO"), 99),
     )
 
-    lines = [f"{'SEVERITY':<10} {'TYPE':<15} {'COMPONENT':<40} MESSAGE"]
-    lines.append("-" * len(lines[0]) + "-" * 60)
+    lines = []
     for issue in sorted_issues:
-        severity = issue.get("severity", "?")
-        issue_type = issue.get("type", "?")
-        component = issue.get("component", "?")
-        message = issue.get("message", "").replace("\n", " ")
+        component = issue.get("component", "")
+        file_path = _strip_project_key(component)
         line_num = issue.get("line", "")
-        location = f"{component}:{line_num}" if line_num else component
-        lines.append(f"{severity:<10} {issue_type:<15} {location:<40} {message}")
+        end_line = issue.get("textRange", {}).get("endLine", "")
+        message = issue.get("message", "").replace("\n", " ").strip()
+
+        if line_num and end_line and str(end_line) != str(line_num):
+            loc = f"{file_path}:{line_num}-{end_line}"
+        elif line_num:
+            loc = f"{file_path}:{line_num}"
+        else:
+            loc = file_path
+
+        lines.append(f"{loc} {message}")
 
     return "\n".join(lines)
 
@@ -268,9 +279,11 @@ def main() -> None:
 
     log("Fetching issues...")
     issues = fetch_issues(host_url, token, project_key, branch=scanner_branch)
-    print(f"Issues found: {len(issues)}")
-    print()
-    print(format_issues(issues))
+    if not issues:
+        print("0 issues")
+    else:
+        print(f"{len(issues)} issues")
+        print(format_issues(issues, project_key))
     sys.exit(1)
 
 
