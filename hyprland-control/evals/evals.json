@@ -1,0 +1,26 @@
+{
+  "skill_name": "hyprland-control",
+  "evals": [
+    {
+      "id": 0,
+      "name": "orchestrate-browser-subagents",
+      "prompt": "I'm building a Python orchestrator that spawns subagents, where each subagent drives its own Firefox instance to scrape a different URL. I want every subagent's browser window placed in its own dedicated Hyprland workspace so I can watch them work side by side, and I need a stable handle (window address + pid) so a follow-up step can take a per-agent screenshot of the result. Give me a single self-contained `orchestrator.py` (Python 3, stdlib only is fine) that I can run. Three URLs as input, three browsers placed on three workspaces, three handles printed at the end as JSON. Show me how teardown should look too. I'm on Hyprland 0.54 with hyprctl, jq, grim, slurp, wl-copy, hyprpicker, brightnessctl, playerctl, wpctl, makoctl, walker, hyprlock installed.",
+      "expected_output": "An orchestrator.py file that uses the agent_launch.py / agent_cleanup.py scripts (or replicates their race-free behavior), assigns one named workspace per URL, returns JSON handles, and shows teardown. Should NOT poll-with-sleep, should NOT close windows by class.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "monitoring-grid-layout",
+      "prompt": "I have 4 long-running subagents already started, each holding one window on workspaces named agent-1, agent-2, agent-3, agent-4. Right now I have to switch between workspaces to check on them. I want to glance at all four at once. I have a single 2560x1440 monitor (HDMI-A-1) — what's the simplest hyprctl-based approach to lay them out so I see all four windows simultaneously? Give me the actual commands to run, and tell me what the tradeoffs are vs. other approaches I could pick instead. Don't reach for tooling I don't have.",
+      "expected_output": "Concrete hyprctl commands that consolidate the four windows into one viewable layout (most likely: move all four onto one workspace and let dwindle tile, or use a deterministic floating grid via window rules / moveactive+resizeactive). Should mention tradeoffs (focus loss, layout reset on close, etc.) and not suggest tools the user doesn't have.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "per-agent-screenshot-and-notify",
+      "prompt": "When my agent (agent-id 'researcher-7') finishes its task, I want to: (a) take a screenshot of just that agent's window — not the whole screen, not other workspaces — and save it to /tmp/researcher-7-result.png, then (b) send me a desktop notification with the file path so I know it's ready. The agent's window was tagged 'agent-researcher-7' and is on workspace 'agent-researcher-7'. Give me a one-shot bash script I can call as the last step of the agent's lifecycle.",
+      "expected_output": "A bash script that resolves the window's geometry from hyprctl (filtering by tag or workspace, not by class), passes that geometry to grim, and fires notify-send. Should handle the case where the window can't be found (don't silently produce a black/empty PNG).",
+      "files": []
+    }
+  ]
+}

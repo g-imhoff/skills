@@ -134,12 +134,45 @@ def check_quality_gate(host_url: str, token: str, project_key: str, branch: str 
     return data.get("projectStatus", {})
 
 
-def fetch_issues(host_url: str, token: str, project_key: str, branch: str | None = None, page_size: int = 500) -> list[dict]:
+def build_scanned_component_keys(project_key: str, project_dir: str) -> set[str]:
+    """Build the set of component keys from files on disk that sonar-scanner just analyzed.
+
+    sonar-scanner indexes local files and uploads them; any SonarQube issue
+    whose component key is NOT in this set belongs to a file that no longer
+    exists and is therefore stale.
+    """
+    base = Path(project_dir or ".").resolve()
+    props_file = base / "sonar-project.properties"
+    source_dirs = ["src"]
+    test_dirs: list[str] = []
+    if props_file.is_file():
+        for line in props_file.read_text().splitlines():
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if key == "sonar.sources":
+                source_dirs = [d.strip() for d in value.split(",") if d.strip()]
+            elif key == "sonar.tests":
+                test_dirs = [d.strip() for d in value.split(",") if d.strip()]
+
+    component_keys: set[str] = set()
+    for dir_name in source_dirs + test_dirs:
+        scan_root = base / dir_name
+        if not scan_root.is_dir():
+            continue
+        for file_path in scan_root.rglob("*"):
+            if file_path.is_file():
+                rel = file_path.relative_to(base)
+                component_keys.add(f"{project_key}:{rel}")
+    return component_keys
+
+
+def fetch_issues(host_url: str, token: str, project_key: str, branch: str | None = None, current_component_keys: set[str] | None = None, page_size: int = 500) -> list[dict]:
     all_issues = []
     page = 1
     while True:
         params = {
             "projectKeys": project_key,
+            "statuses": "OPEN,CONFIRMED,REOPENED",
             "ps": str(page_size),
             "p": str(page),
         }
@@ -153,7 +186,15 @@ def fetch_issues(host_url: str, token: str, project_key: str, branch: str | None
         if len(all_issues) >= total or not issues:
             break
         page += 1
-    return all_issues
+
+    if current_component_keys is None:
+        return all_issues
+
+    live_issues = [i for i in all_issues if i.get("component", "") in current_component_keys]
+    stale_count = len(all_issues) - len(live_issues)
+    if stale_count:
+        log(f"Excluded {stale_count} stale issue(s) on files no longer in the project")
+    return live_issues
 
 
 SEVERITY_ORDER = {"BLOCKER": 0, "CRITICAL": 1, "MAJOR": 2, "MINOR": 3, "INFO": 4}
@@ -277,8 +318,12 @@ def main() -> None:
             print(f"  - {metric} {val} {op} {threshold}")
         print()
 
+    log("Building scanned file set from local tree...")
+    current_components = build_scanned_component_keys(project_key, args.project_dir)
+    log(f"Local tree has {len(current_components)} file(s) matching sonar.sources/sonar.tests")
+
     log("Fetching issues...")
-    issues = fetch_issues(host_url, token, project_key, branch=scanner_branch)
+    issues = fetch_issues(host_url, token, project_key, branch=scanner_branch, current_component_keys=current_components)
     if not issues:
         print("0 issues")
     else:
