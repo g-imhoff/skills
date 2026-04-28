@@ -33,6 +33,8 @@ scripts/agent_launch.py    spawn a process into a per-agent workspace,
                            wait race-free for its window, return JSON.
 scripts/agent_cleanup.py   close every window belonging to an agent,
                            by tag / workspace / pid.
+scripts/responsive_test.py screenshot a URL at multiple viewport sizes;
+                           composes agent_launch + resize + grim.
 hyprctl -j <query>         read state as JSON.
 hyprctl dispatch <action>  take an action.
 hyprctl --batch "...; ..." atomic multi-action.
@@ -91,6 +93,37 @@ python scripts/agent_cleanup.py --agent-id 42 --dry-run
 ```
 
 Matches by tag *and* workspace *and* explicit pids — whichever applies. Idempotent: matching zero windows is success.
+
+### Pattern: resize a specific window without yanking focus
+
+For driving an existing window's geometry from outside (responsive testing, layout sweeps, deterministic grids), use the `…windowpixel` dispatchers — they take a window selector and don't require focus. The `…active` variants only target the focused window and aren't safe to script in a loop.
+
+```bash
+# Float, resize, and place a specific window — atomic, no focus change.
+hyprctl --batch "dispatch togglefloating address:0x55ab... ; \
+                 dispatch resizewindowpixel exact 375 667,address:0x55ab... ; \
+                 dispatch movewindowpixel exact 100 100,address:0x55ab..."
+```
+
+Two gotchas:
+- `resizewindowpixel` on a *tiled* window adjusts splits, not absolute size. Float the window first (or launch it with `--rule "float"`) if you need an exact pixel size.
+- The window dimensions Hyprland reports include any client-side decorations the app draws. The actual content viewport may be a few pixels smaller; use a kiosk/headless flag (`firefox --kiosk`, `chromium --app=URL`, etc.) when you need the window to *be* the viewport.
+
+### Pattern: responsive screenshot sweep
+
+`scripts/responsive_test.py` bundles the launch → resize → grim → cleanup loop into one call. It's the typical use of the resize dispatchers above.
+
+```bash
+python scripts/responsive_test.py \
+  --url https://example.com \
+  --breakpoints mobile=375x667 tablet=768x1024 laptop=1280x800 desktop=1920x1080 \
+  --out /tmp/example-shots/ \
+  --kiosk
+```
+
+Output: one PNG per breakpoint at `/tmp/example-shots/<name>.png`, plus a JSON manifest on stdout listing requested vs actual sizes and per-shot success. Default breakpoints are the four above; pass `WxH` (auto-named) or `NAME=WxH` to override. The script reuses `agent_launch.py` for the race-free spawn and `agent_cleanup.py` for teardown, so it inherits all the orchestration guarantees — runs without disturbing the user's other windows.
+
+Useful flags: `--browser chromium` to swap browsers, `--settle 1.0` to give heavy pages more time to reflow before each capture, `--keep` to leave the browser open for manual inspection, `--browser-arg --headless` if the browser supports it (note: headless windows may not appear on the workspace at all — the script will time out).
 
 ### Layout for the monitoring grid
 

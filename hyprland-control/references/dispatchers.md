@@ -58,8 +58,10 @@ Use these wherever a dispatcher takes a "window" argument. The leading `,` is pa
 | `focuscurrentorlast`| —                                             | toggle last focused |
 | `swapnext`          | `prev` / `next`                               | swap with master/next |
 | `cyclenext`         | `prev` / `next` / `tiled` / `floating`        | cycle focus |
-| `moveactive`        | `dx dy` (px) or `exact X Y`                   | move floating window |
-| `resizeactive`      | `dw dh` or `exact W H`                        | resize active |
+| `moveactive`        | `dx dy` (px) or `exact X Y`                   | move floating window (focused only) |
+| `resizeactive`      | `dw dh` or `exact W H`                        | resize active (focused only) |
+| `movewindowpixel`   | `dx dy,window` or `exact X Y,window`          | move any window — no focus required |
+| `resizewindowpixel` | `dw dh,window` or `exact W H,window`          | resize any window — no focus required (use this in scripts) |
 | `splitratio`        | `+0.1` / `-0.1` / `exact 0.6`                 | adjust dwindle/master split |
 
 ## Groups (tabbed windows)
